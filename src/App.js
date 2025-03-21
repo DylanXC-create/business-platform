@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { auth } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import xaiClient from './xai';
+import { db } from './firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import './App.css';
 
 function App() {
@@ -20,14 +21,25 @@ function App() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
-  const [quickBooksToken, setQuickBooksToken] = useState(null);
-  const [quickBooksSales, setQuickBooksSales] = useState([]);
-  const [companyId, setCompanyId] = useState('');
+  const [preferredMetrics, setPreferredMetrics] = useState({
+    showSales: true,
+    showInventory: true,
+    showAdSpend: true
+  });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setPreferredMetrics(userData.preferredMetrics || {
+            showSales: true,
+            showInventory: true,
+            showAdSpend: true
+          });
+        }
         fetch('/api/hello')
           .then((response) => response.json())
           .then((data) => setData(data))
@@ -40,20 +52,6 @@ function App() {
       }
     });
     return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    if (code) {
-      fetch(`/api/quickbooks-callback?code=${code}`)
-        .then((response) => response.json())
-        .then((result) => {
-          setQuickBooksToken(result.access_token);
-          window.history.replaceState({}, document.title, "/");
-        })
-        .catch((error) => setError('Failed to authenticate with QuickBooks'));
-    }
   }, []);
 
   const handleLogin = async () => {
@@ -82,8 +80,7 @@ function App() {
       setXaiPrompt('');
       setDevResponse('');
       setDevPrompt('');
-      setQuickBooksToken(null);
-      setQuickBooksSales([]);
+      setPreferredMetrics({ showSales: true, showInventory: true, showAdSpend: true });
     } catch (err) {
       setError('Failed to log out: ' + err.message);
     }
@@ -95,16 +92,20 @@ function App() {
       return;
     }
     try {
-      const response = await xaiClient.generateText({
-        model: 'grok-2-latest',
-        prompt: `You are a business analytics assistant for a small business management platform. The business has the following data: ${
-          quickBooksSales.length > 0
-            ? `Recent sales transactions: ${JSON.stringify(quickBooksSales.map(sale => ({ date: sale.TxnDate, amount: sale.TotalAmt })))}`
-            : `Mock data: ${JSON.stringify({ sales: data.sales, inventory: data.inventory, adSpend: data.adSpend })}`
-        }. Provide actionable suggestions based on this data. ${xaiPrompt}`,
-        temperature: 0
+      const response = await fetch('/api/ask-xai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: xaiPrompt,
+          businessData: {
+            sales: data.sales,
+            inventory: data.inventory,
+            adSpend: data.adSpend
+          }
+        })
       });
-      setXaiResponse(response.text);
+      const result = await response.json();
+      setXaiResponse(result.response);
     } catch (error) {
       setXaiResponse('Error getting response from xAI');
     }
@@ -116,36 +117,58 @@ function App() {
       return;
     }
     try {
-      const response = await xaiClient.generateText({
-        model: 'grok-2-latest',
-        prompt: `You are a coding assistant for a React-based small business management platform. ${devPrompt}`,
-        temperature: 0
+      const response = await fetch('/api/ask-xai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `You are a coding assistant for a React-based small business management platform. ${devPrompt}`
+        })
       });
-      setDevResponse(response.text);
+      const result = await response.json();
+      setDevResponse(result.response);
     } catch (error) {
       setDevResponse('Error getting response from xAI');
     }
   };
 
-  const handleQuickBooksAuth = () => {
-    window.location.href = '/api/quickbooks-auth';
-  };
-
-  const handleFetchQuickBooksSales = async () => {
-    if (!quickBooksToken || !companyId) {
-      setError('Please authenticate with QuickBooks and provide a company ID.');
+  const handlePredictSales = async () => {
+    if (!user) {
+      setXaiResponse('Please log in to use xAI features.');
       return;
     }
     try {
-      const response = await fetch('/api/quickbooks-sales', {
+      const mockSalesData = [
+        { date: '2025-01-01', amount: 5000 },
+        { date: '2025-02-01', amount: 5500 },
+        { date: '2025-03-01', amount: 6000 }
+      ];
+      const response = await fetch('/api/ask-xai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: quickBooksToken, company_id: companyId })
+        body: JSON.stringify({
+          prompt: `You are a predictive analytics assistant. Based on the following sales data: ${JSON.stringify(mockSalesData)}. Forecast the sales trend for the next 3 months and provide recommendations.`
+        })
       });
-      const salesData = await response.json();
-      setQuickBooksSales(salesData.QueryResponse?.SalesReceipt || []);
+      const result = await response.json();
+      setXaiResponse(result.response);
     } catch (error) {
-      setError('Failed to fetch QuickBooks sales data');
+      setXaiResponse('Error getting predictive analytics from xAI');
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    if (!user) {
+      setError('Please log in to save preferences.');
+      return;
+    }
+    try {
+      await setDoc(doc(db, 'users', user.uid), {
+        preferredMetrics: preferredMetrics
+      }, { merge: true });
+      setError('');
+      alert('Preferences saved successfully!');
+    } catch (err) {
+      setError('Failed to save preferences: ' + err.message);
     }
   };
 
@@ -203,40 +226,46 @@ function App() {
             <button onClick={handleLogout}>Log Out</button>
           </div>
           <div>
-            <h3>QuickBooks Integration</h3>
-            {!quickBooksToken ? (
-              <button onClick={handleQuickBooksAuth}>Connect to QuickBooks</button>
-            ) : (
-              <div>
-                <input
-                  type="text"
-                  value={companyId}
-                  onChange={(e) => setCompanyId(e.target.value)}
-                  placeholder="Enter QuickBooks Company ID"
-                  style={{ width: '200px', padding: '5px', margin: '5px' }}
-                />
-                <button onClick={handleFetchQuickBooksSales}>Fetch Sales Data</button>
-                {quickBooksSales.length > 0 && (
-                  <div>
-                    <h4>Recent Sales</h4>
-                    <ul>
-                      {quickBooksSales.map((sale, index) => (
-                        <li key={index}>
-                          Date: {sale.TxnDate}, Amount: ${sale.TotalAmt}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
+            <h3>Your Metrics (Mock Data)</h3>
+            {preferredMetrics.showSales && <p>Sales: ${data.sales}</p>}
+            {preferredMetrics.showInventory && <p>Inventory: {data.inventory} units</p>}
+            {preferredMetrics.showAdSpend && <p>Ad Spend: ${data.adSpend}</p>}
+            <p>Message: {data.message}</p>
           </div>
           <div>
-            <h3>Your Metrics (Mock Data)</h3>
-            <p>Sales: ${data.sales}</p>
-            <p>Inventory: {data.inventory} units</p>
-            <p>Ad Spend: ${data.adSpend}</p>
-            <p>Message: {data.message}</p>
+            <h3>Customize Metrics Display</h3>
+            <label>
+              <input
+                type="checkbox"
+                checked={preferredMetrics.showSales}
+                onChange={(e) => setPreferredMetrics({ ...preferredMetrics, showSales: e.target.checked })}
+              />
+              Show Sales
+            </label>
+            <br />
+            <label>
+              <input
+                type="checkbox"
+                checked={preferredMetrics.showInventory}
+                onChange={(e) => setPreferredMetrics({ ...preferredMetrics, showInventory: e.target.checked })}
+              />
+              Show Inventory
+            </label>
+            <br />
+            <label>
+              <input
+                type="checkbox"
+                checked={preferredMetrics.showAdSpend}
+                onChange={(e) => setPreferredMetrics({ ...preferredMetrics, showAdSpend: e.target.checked })}
+              />
+              Show Ad Spend
+            </label>
+            <br />
+            <button onClick={handleSavePreferences}>Save Preferences</button>
+          </div>
+          <div>
+            <h3>Predictive Analytics (Mock Data)</h3>
+            <button onClick={handlePredictSales}>Predict Sales Trend</button>
           </div>
           <div>
             <h3>Ask xAI for Business Insights</h3>
