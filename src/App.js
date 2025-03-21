@@ -26,6 +26,7 @@ function App() {
     showInventory: true,
     showAdSpend: true
   });
+  const [salesData, setSalesData] = useState([]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -49,6 +50,10 @@ function App() {
             inventory: 0,
             adSpend: 0
           }));
+        fetch('/api/fetch-sales')
+          .then((response) => response.json())
+          .then((sales) => setSalesData(sales))
+          .catch((error) => setSalesData([]));
       }
     });
     return () => unsubscribe();
@@ -81,6 +86,7 @@ function App() {
       setDevResponse('');
       setDevPrompt('');
       setPreferredMetrics({ showSales: true, showInventory: true, showAdSpend: true });
+      setSalesData([]);
     } catch (err) {
       setError('Failed to log out: ' + err.message);
     }
@@ -137,16 +143,11 @@ function App() {
       return;
     }
     try {
-      const mockSalesData = [
-        { date: '2025-01-01', amount: 5000 },
-        { date: '2025-02-01', amount: 5500 },
-        { date: '2025-03-01', amount: 6000 }
-      ];
       const response = await fetch('/api/ask-xai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `You are a predictive analytics assistant. Based on the following sales data: ${JSON.stringify(mockSalesData)}. Forecast the sales trend for the next 3 months and provide recommendations.`
+          prompt: `You are a predictive analytics assistant. Based on the following sales data: ${JSON.stringify(salesData)}. Forecast the sales trend for the next 3 months and provide recommendations.`
         })
       });
       const result = await response.json();
@@ -231,6 +232,20 @@ function App() {
             {preferredMetrics.showInventory && <p>Inventory: {data.inventory} units</p>}
             {preferredMetrics.showAdSpend && <p>Ad Spend: ${data.adSpend}</p>}
             <p>Message: {data.message}</p>
+          </div>
+          <div>
+            <h3>Recent Sales (Mock Data)</h3>
+            {salesData.length > 0 ? (
+              <ul>
+                {salesData.map((sale, index) => (
+                  <li key={index}>
+                    Date: {sale.date}, Amount: ${sale.amount}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No sales data available.</p>
+            )}
           </div>
           <div>
             <h3>Customize Metrics Display</h3>
