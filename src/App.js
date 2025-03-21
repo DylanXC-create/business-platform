@@ -1,23 +1,32 @@
-import logo from './logo.svg';
+import React, { useEffect, useState } from 'react';
 import './App.css';
 
 function App() {
+  const [message, setMessage] = useState('Loading...');
+
+  useEffect(() => {
+    fetch('/api/hello')
+      .then((response) => response.json())
+      .then((data) => setMessage(data.message))
+      .catch((error) => setMessage('Error fetching data'));
+  }, []);
+
   return (
     <div className="App">
       <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
+        <h1>Business Management Platform</h1>
       </header>
+      <main>
+        <section>
+          <h2>Dashboard</h2>
+          <div>
+            <p>Sales: $5,000</p>
+            <p>Inventory: 500 units</p>
+            <p>API Response: {message}</p>
+            <button>Approve Order</button>
+          </div>
+        </section>
+      </main>
     </div>
   );
 }
