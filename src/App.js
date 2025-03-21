@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { auth } from './firebase';
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import './App.css';
 
 function App() {
@@ -10,25 +12,66 @@ function App() {
   });
   const [xaiPrompt, setXaiPrompt] = useState('');
   const [xaiResponse, setXaiResponse] = useState('');
+  const [user, setUser] = useState(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('/api/hello')
-      .then((response) => response.json())
-      .then((data) => setData(data))
-      .catch((error) => setData({
-        message: 'Error fetching data',
-        sales: 0,
-        inventory: 0,
-        adSpend: 0
-      }));
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        fetch('/api/hello')
+          .then((response) => response.json())
+          .then((data) => setData(data))
+          .catch((error) => setData({
+            message: 'Error fetching data',
+            sales: 0,
+            inventory: 0,
+            adSpend: 0
+          }));
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
+  const handleLogin = async () => {
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      setError('');
+    } catch (err) {
+      setError('Failed to log in: ' + err.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setData({ message: 'Loading...', sales: 0, inventory: 0, adSpend: 0 });
+      setXaiResponse('');
+      setXaiPrompt('');
+    } catch (err) {
+      setError('Failed to log out: ' + err.message);
+    }
+  };
+
   const handleAskXai = async () => {
+    if (!user) {
+      setXaiResponse('Please log in to use xAI features.');
+      return;
+    }
     try {
       const response = await fetch('/api/ask-xai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: xaiPrompt })
+        body: JSON.stringify({
+          prompt: xaiPrompt,
+          businessData: {
+            sales: data.sales,
+            inventory: data.inventory,
+            adSpend: data.adSpend
+          }
+        })
       });
       const result = await response.json();
       setXaiResponse(result.response);
@@ -36,6 +79,42 @@ function App() {
       setXaiResponse('Error getting response from xAI');
     }
   };
+
+  if (!user) {
+    return (
+      <div className="App">
+        <header className="App-header">
+          <h1>Business Management Platform</h1>
+        </header>
+        <main>
+          <section>
+            <h2>Login</h2>
+            <div>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
+                style={{ width: '200px', padding: '5px', margin: '5px' }}
+              />
+              <br />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                style={{ width: '200px', padding: '5px', margin: '5px' }}
+              />
+              <br />
+              <button onClick={handleLogin}>Log In</button>
+              {error && <p style={{ color: 'red' }}>{error}</p>}
+              <p>Don’t have an account? Sign up manually in Firebase for now.</p>
+            </div>
+          </section>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="App">
@@ -46,6 +125,10 @@ function App() {
         <section>
           <h2>Dashboard</h2>
           <div>
+            <h3>Welcome, {user.email}</h3>
+            <button onClick={handleLogout}>Log Out</button>
+          </div>
+          <div>
             <h3>Your Metrics</h3>
             <p>Sales: ${data.sales}</p>
             <p>Inventory: {data.inventory} units</p>
@@ -53,12 +136,12 @@ function App() {
             <p>Message: {data.message}</p>
           </div>
           <div>
-            <h3>Ask xAI for Coding Help</h3>
+            <h3>Ask xAI for Business Insights</h3>
             <input
               type="text"
               value={xaiPrompt}
               onChange={(e) => setXaiPrompt(e.target.value)}
-              placeholder="e.g., How can I improve my dashboard?"
+              placeholder="e.g., How can I improve my sales?"
               style={{ width: '300px', padding: '5px' }}
             />
             <button onClick={handleAskXai}>Ask xAI</button>
