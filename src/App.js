@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { auth } from './firebase';
-import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
 import './App.css';
 
 function App() {
@@ -16,12 +16,13 @@ function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
-        fetch('/api/hello')
+        fetch('/api/fetch-data')
           .then((response) => response.json())
           .then((data) => setData(data))
           .catch((error) => setData({
@@ -41,6 +42,15 @@ function App() {
       setError('');
     } catch (err) {
       setError('Failed to log in: ' + err.message);
+    }
+  };
+
+  const handleRegister = async () => {
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      setError('');
+    } catch (err) {
+      setError('Failed to register: ' + err.message);
     }
   };
 
@@ -88,7 +98,7 @@ function App() {
         </header>
         <main>
           <section>
-            <h2>Login</h2>
+            <h2>{isRegistering ? 'Register' : 'Login'}</h2>
             <div>
               <input
                 type="email"
@@ -106,9 +116,14 @@ function App() {
                 style={{ width: '200px', padding: '5px', margin: '5px' }}
               />
               <br />
-              <button onClick={handleLogin}>Log In</button>
+              <button onClick={isRegistering ? handleRegister : handleLogin}>
+                {isRegistering ? 'Register' : 'Log In'}
+              </button>
+              <br />
+              <button onClick={() => setIsRegistering(!isRegistering)} style={{ marginTop: '10px' }}>
+                {isRegistering ? 'Switch to Login' : 'Switch to Register'}
+              </button>
               {error && <p style={{ color: 'red' }}>{error}</p>}
-              <p>Don’t have an account? Sign up manually in Firebase for now.</p>
             </div>
           </section>
         </main>
